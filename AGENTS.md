@@ -520,3 +520,41 @@ is the explicit opt-out (`inline:off`).
 - [`contributing-docs/08_static_code_checks.rst`](contributing-docs/08_static_code_checks.rst)
 - [`contributing-docs/12_provider_distributions.rst`](contributing-docs/12_provider_distributions.rst)
 - [`contributing-docs/19_execution_api_versioning.rst`](contributing-docs/19_execution_api_versioning.rst)
+
+## Cursor Cloud specific instructions
+
+The VM comes with the local dev environment already prepared: `uv` (in
+`~/.local/bin`), `prek`, system build headers (krb5/sasl/ldap/xmlsec/graphviz/
+mysql/odbc — from `Dockerfile.ci`'s dev apt deps), the shared `.venv` synced for
+`airflow-core`, and the React UI's `node_modules` + `dist`. The startup update
+script refreshes only the Python env with `uv sync --project airflow-core`.
+`breeze` is **not** usable here (it needs Docker, which is not installed) — use
+the local `uv` virtualenv flow described in
+[`contributing-docs/07_local_virtualenv.rst`](contributing-docs/07_local_virtualenv.rst)
+instead. SQLite is the backend; there is no Postgres/MySQL service running.
+
+- **Always pass `--project <PROJECT>` to `uv`.** Running `uv sync` or `uv run`
+  from the repo **root** (no `--project`) re-resolves the whole workspace — the
+  root project's default `dev` group pulls `apache-airflow[all]` (100+ providers,
+  ~500 packages), which is slow and flakier. Scope every command, e.g.
+  `uv run --project airflow-core airflow ...` or
+  `uv run --project task-sdk pytest ...`. The commands in the `## Commands`
+  section already follow this.
+- **Run the app (core product):** `uv run --project airflow-core airflow standalone`
+  (set `AIRFLOW_HOME`, defaults to `~/airflow`). This starts api-server on
+  `:8080` (also serves the UI at `/ui/`), scheduler on `:8793`, triggerer on
+  `:8794`, and the `dag-processor`, and auto-creates an `admin` user. The
+  generated password is printed to the logs and stored at
+  `$AIRFLOW_HOME/simple_auth_manager_passwords.json.generated` (SimpleAuthManager);
+  it is only generated on first init, so reuse it on later starts.
+- **Smoke test end to end:** `airflow dags unpause example_bash_operator`, then
+  `airflow dags trigger example_bash_operator`; the running scheduler executes
+  it. Check `airflow dags list-runs example_bash_operator` /
+  `airflow tasks states-for-dag-run <dag> <run_id>`. Example Dags load by default.
+- **UI:** the api-server serves the prebuilt bundle from
+  `airflow-core/src/airflow/ui/dist`; it reads from disk, so a fresh `pnpm build`
+  is picked up without restarting the server. To rebuild the UI:
+  `source ~/.nvm/nvm.sh && cd airflow-core/src/airflow/ui && pnpm install --frozen-lockfile && NODE_OPTIONS=--max-old-space-size=8192 pnpm build`
+  (`pnpm` comes from `nvm`, node v22, and is not on `PATH` until `nvm.sh` is
+  sourced). `pnpm dev` (vite, `:5173`) is for hot-reload but must be accessed
+  through the api-server port `:8080` — hitting `:5173` directly causes auth errors.
